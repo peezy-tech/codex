@@ -2,10 +2,15 @@ use crate::function_tool::FunctionCallError;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::hook_names::HookToolName;
+use crate::tools::registry::PostToolUsePayload;
+use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
+use codex_protocol::models::function_call_output_content_items_to_text;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
+use serde_json::json;
 
 use super::ExecContext;
 use super::PUBLIC_TOOL_NAME;
@@ -100,6 +105,38 @@ impl ToolHandler for CodeModeExecuteHandler {
 
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Custom { .. })
+    }
+
+    fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        let ToolPayload::Custom { input } = &invocation.payload else {
+            return None;
+        };
+
+        Some(PreToolUsePayload {
+            tool_name: HookToolName::new(PUBLIC_TOOL_NAME),
+            tool_input: json!({ "source": input }),
+        })
+    }
+
+    fn post_tool_use_payload(
+        &self,
+        invocation: &ToolInvocation,
+        result: &Self::Output,
+    ) -> Option<PostToolUsePayload> {
+        let ToolPayload::Custom { input } = &invocation.payload else {
+            return None;
+        };
+
+        Some(PostToolUsePayload {
+            tool_name: HookToolName::new(PUBLIC_TOOL_NAME),
+            tool_use_id: invocation.call_id.clone(),
+            tool_input: json!({ "source": input }),
+            tool_response: json!({
+                "success": result.success,
+                "output": function_call_output_content_items_to_text(&result.body)
+                    .unwrap_or_default(),
+            }),
+        })
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
