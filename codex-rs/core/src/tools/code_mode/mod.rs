@@ -47,6 +47,81 @@ pub(crate) const PUBLIC_TOOL_NAME: &str = codex_code_mode::PUBLIC_TOOL_NAME;
 pub(crate) const WAIT_TOOL_NAME: &str = codex_code_mode::WAIT_TOOL_NAME;
 pub(crate) const DEFAULT_WAIT_YIELD_TIME_MS: u64 = codex_code_mode::DEFAULT_WAIT_YIELD_TIME_MS;
 
+/// Execute Code Mode source directly inside a core task.
+///
+/// Normal model-authored Code Mode calls run while the sampling loop owns a
+/// Code Mode turn worker. Direct replay does not enter sampling, so this helper
+/// constructs the same nested-tool router and worker before sending the source
+/// into the V8 runtime.
+pub(crate) async fn execute_code_mode_source(
+    session: Arc<Session>,
+    turn: Arc<TurnContext>,
+    tracker: SharedTurnDiffTracker,
+    call_id: String,
+    source: String,
+) -> Result<FunctionToolOutput, FunctionCallError> {
+    let args =
+        codex_code_mode::parse_exec_source(&source).map_err(FunctionCallError::RespondToModel)?;
+    let exec = ExecContext { session, turn };
+    let router = Arc::new(build_nested_router(&exec).await);
+    let specs = router.specs();
+    let enabled_tools = collect_code_mode_tool_definitions(&specs);
+    let _code_mode_worker = exec
+        .session
+        .services
+        .code_mode_service
+        .start_turn_worker(
+            &exec.session,
+            &exec.turn,
+            Arc::clone(&router),
+            Arc::clone(&tracker),
+        )
+        .await
+        .ok_or_else(|| {
+            FunctionCallError::RespondToModel("code_mode feature is not enabled".to_string())
+        })?;
+    let stored_values = exec
+        .session
+        .services
+        .code_mode_service
+        .stored_values()
+        .await;
+    let runtime_cell_id = exec.session.services.code_mode_service.allocate_cell_id();
+    let code_cell_trace = exec
+        .session
+        .services
+        .rollout_thread_trace
+        .start_code_cell_trace(
+            exec.turn.sub_id.as_str(),
+            runtime_cell_id.as_str(),
+            call_id.as_str(),
+            args.code.as_str(),
+        );
+    let started_at = std::time::Instant::now();
+    let response = exec
+        .session
+        .services
+        .code_mode_service
+        .execute(codex_code_mode::ExecuteRequest {
+            cell_id: runtime_cell_id,
+            tool_call_id: call_id,
+            enabled_tools,
+            source: args.code,
+            stored_values,
+            yield_time_ms: args.yield_time_ms,
+            max_output_tokens: args.max_output_tokens,
+        })
+        .await
+        .map_err(FunctionCallError::RespondToModel)?;
+    code_cell_trace.record_initial_response(&response);
+    if !matches!(response, codex_code_mode::RuntimeResponse::Yielded { .. }) {
+        code_cell_trace.record_ended(&response);
+    }
+    handle_runtime_response(&exec, response, args.max_output_tokens, started_at)
+        .await
+        .map_err(FunctionCallError::RespondToModel)
+}
+
 /// Returns true for the un-namespaced code-mode `exec` tool.
 pub(crate) fn is_exec_tool_name(tool_name: &ToolName) -> bool {
     tool_name.namespace.is_none() && tool_name.name == PUBLIC_TOOL_NAME

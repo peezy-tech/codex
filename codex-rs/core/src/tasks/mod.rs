@@ -1,3 +1,4 @@
+mod code_mode_replay;
 mod compact;
 mod regular;
 mod review;
@@ -51,6 +52,7 @@ use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 
+pub(crate) use code_mode_replay::CodeModeReplayTask;
 use codex_features::Feature;
 use codex_protocol::models::ContentItem;
 pub(crate) use compact::CompactTask;
