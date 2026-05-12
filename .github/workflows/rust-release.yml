@@ -49,7 +49,7 @@ jobs:
 
   build:
     needs: tag-check
-    name: Build - ${{ matrix.runner }} - ${{ matrix.target }} - ${{ matrix.bundle }}
+    name: Build - ${{ matrix.runner }} - ${{ matrix.target }}
     runs-on: ${{ matrix.runs_on || matrix.runner }}
     # Release builds can take a long time, so leave some headroom to avoid
     # having to restart the full workflow due to a timeout.
@@ -69,55 +69,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15-xlarge
+          - runner: macos-15
             target: aarch64-apple-darwin
-            bundle: primary
             artifact_name: aarch64-apple-darwin
             binaries: "codex codex-responses-api-proxy"
-            build_dmg: "true"
-          - runner: macos-15-xlarge
-            target: aarch64-apple-darwin
-            bundle: app-server
-            artifact_name: aarch64-apple-darwin-app-server
-            binaries: "codex-app-server"
-            build_dmg: "false"
-          - runner: macos-15-xlarge
+          - runner: macos-15-intel
             target: x86_64-apple-darwin
-            bundle: primary
             artifact_name: x86_64-apple-darwin
             binaries: "codex codex-responses-api-proxy"
-            build_dmg: "true"
-          - runner: macos-15-xlarge
-            target: x86_64-apple-darwin
-            bundle: app-server
-            artifact_name: x86_64-apple-darwin-app-server
-            binaries: "codex-app-server"
-            build_dmg: "false"
           # Release artifacts intentionally ship MUSL-linked Linux binaries.
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            bundle: primary
             artifact_name: x86_64-unknown-linux-musl
             binaries: "codex codex-responses-api-proxy bwrap"
-            build_dmg: "false"
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-            bundle: app-server
-            artifact_name: x86_64-unknown-linux-musl-app-server
-            binaries: "codex-app-server"
-            build_dmg: "false"
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            bundle: primary
             artifact_name: aarch64-unknown-linux-musl
             binaries: "codex codex-responses-api-proxy bwrap"
-            build_dmg: "false"
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-            bundle: app-server
-            artifact_name: aarch64-unknown-linux-musl-app-server
-            binaries: "codex-app-server"
-            build_dmg: "false"
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -158,7 +126,15 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev zstd
+      - name: Install macOS compression tools
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v zstd >/dev/null 2>&1; then
+            brew install zstd
+          fi
       - name: Install UBSan runtime (musl)
         if: ${{ matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-musl' }}
         shell: bash
@@ -260,24 +236,6 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
-      - if: ${{ contains(matrix.target, 'linux') && matrix.bundle == 'primary' }}
-        name: Build bwrap and export digest
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="${{ matrix.target }}"
-          cargo build --target "$target" --release --timings --bin bwrap
-
-          bwrap_path="target/${target}/release/bwrap"
-          if [[ ! -f "$bwrap_path" ]]; then
-            echo "bwrap binary ${bwrap_path} not found"
-            exit 1
-          fi
-
-          digest="$(sha256sum "$bwrap_path" | awk '{print $1}')"
-          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
-          echo "Built bwrap ${bwrap_path} with sha256:${digest}"
-
       - name: Cargo build
         shell: bash
         run: |
@@ -291,84 +249,9 @@ jobs:
       - name: Upload Cargo timings
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: cargo-timings-rust-release-${{ matrix.target }}-${{ matrix.bundle }}
+          name: cargo-timings-rust-release-${{ matrix.target }}
           path: codex-rs/target/**/cargo-timings/cargo-timing.html
           if-no-files-found: warn
-
-      - if: ${{ contains(matrix.target, 'linux') }}
-        name: Cosign Linux artifacts
-        uses: ./.github/actions/linux-code-sign
-        with:
-          target: ${{ matrix.target }}
-          artifacts-dir: ${{ github.workspace }}/codex-rs/target/${{ matrix.target }}/release
-          binaries: ${{ matrix.binaries }}
-
-      - if: ${{ runner.os == 'macOS' }}
-        name: MacOS code signing (binaries)
-        uses: ./.github/actions/macos-code-sign
-        with:
-          target: ${{ matrix.target }}
-          binaries: ${{ matrix.binaries }}
-          sign-binaries: "true"
-          sign-dmg: "false"
-          apple-certificate: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          apple-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          apple-notarization-key-p8: ${{ secrets.APPLE_NOTARIZATION_KEY_P8 }}
-          apple-notarization-key-id: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
-          apple-notarization-issuer-id: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-
-      - if: ${{ runner.os == 'macOS' && matrix.build_dmg == 'true' }}
-        name: Build macOS dmg
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          target="${{ matrix.target }}"
-          release_dir="target/${target}/release"
-          dmg_root="${RUNNER_TEMP}/codex-dmg-root"
-          volname="Codex (${target})"
-          dmg_path="${release_dir}/codex-${target}.dmg"
-
-          # The previous "MacOS code signing (binaries)" step signs + notarizes the
-          # built artifacts in `${release_dir}`. This step packages *those same*
-          # signed binaries into a dmg.
-          rm -rf "$dmg_root"
-          mkdir -p "$dmg_root"
-
-          for binary in ${{ matrix.binaries }}; do
-            binary_path="${release_dir}/${binary}"
-            if [[ ! -f "${binary_path}" ]]; then
-              echo "Binary ${binary_path} not found"
-              exit 1
-            fi
-            ditto "${binary_path}" "${dmg_root}/${binary}"
-          done
-
-          rm -f "$dmg_path"
-          hdiutil create \
-            -volname "$volname" \
-            -srcfolder "$dmg_root" \
-            -format UDZO \
-            -ov \
-            "$dmg_path"
-
-          if [[ ! -f "$dmg_path" ]]; then
-            echo "dmg $dmg_path not found after build"
-            exit 1
-          fi
-
-      - if: ${{ runner.os == 'macOS' && matrix.build_dmg == 'true' }}
-        name: MacOS code signing (dmg)
-        uses: ./.github/actions/macos-code-sign
-        with:
-          target: ${{ matrix.target }}
-          sign-binaries: "false"
-          sign-dmg: "true"
-          apple-certificate: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          apple-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          apple-notarization-key-p8: ${{ secrets.APPLE_NOTARIZATION_KEY_P8 }}
-          apple-notarization-key-id: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
-          apple-notarization-issuer-id: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
 
       - name: Stage artifacts
         shell: bash
@@ -378,13 +261,9 @@ jobs:
 
           for binary in ${{ matrix.binaries }}; do
             cp "target/${{ matrix.target }}/release/${binary}" "$dest/${binary}-${{ matrix.target }}"
-            if [[ "${{ matrix.target }}" == *linux* ]]; then
-              cp "target/${{ matrix.target }}/release/${binary}.sigstore" \
-                "$dest/${binary}-${{ matrix.target }}.sigstore"
-            fi
           done
 
-          if [[ "${{ matrix.target }}" == *linux* && "${{ matrix.bundle }}" == "primary" ]]; then
+          if [[ "${{ matrix.target }}" == *linux* ]]; then
             bundle_root="${RUNNER_TEMP}/codex-${{ matrix.target }}-bundle"
             rm -rf "$bundle_root"
             mkdir -p "$bundle_root/codex-resources"
@@ -393,10 +272,6 @@ jobs:
             chmod 0755 "$bundle_root/codex" "$bundle_root/codex-resources/bwrap"
             tar -C "$bundle_root" -cf - codex codex-resources/bwrap |
               zstd -T0 -19 -o "$dest/codex-${{ matrix.target }}-bundle.tar.zst"
-          fi
-
-          if [[ "${{ matrix.build_dmg }}" == "true" ]]; then
-            cp target/${{ matrix.target }}/release/codex-${{ matrix.target }}.dmg "$dest/codex-${{ matrix.target }}.dmg"
           fi
 
       - name: Compress artifacts
@@ -422,11 +297,6 @@ jobs:
               continue
             fi
 
-            # Don't try to compress signature bundles.
-            if [[ "$base" == *.sigstore ]]; then
-              continue
-            fi
-
             # Create per-binary tar.gz
             tar -C "$dest" -czf "$dest/${base}.tar.gz" "$base"
 
@@ -445,29 +315,94 @@ jobs:
 
   build-windows:
     needs: tag-check
-    uses: ./.github/workflows/rust-release-windows.yml
-    with:
-      release-lto: ${{ contains(github.ref_name, '-alpha') && 'thin' || 'fat' }}
-    secrets: inherit
+    name: Build Windows - ${{ matrix.runner }} - ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      CARGO_PROFILE_RELEASE_LTO: thin
+      WINDOWS_BINARIES: "codex codex-responses-api-proxy codex-windows-sandbox-setup codex-command-runner"
 
-  argument-comment-lint-release-assets:
-    name: argument-comment-lint release assets
-    needs: tag-check
-    uses: ./.github/workflows/rust-release-argument-comment-lint.yml
-    with:
-      publish: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
 
-  zsh-release-assets:
-    name: zsh release assets
-    needs: tag-check
-    uses: ./.github/workflows/rust-release-zsh.yml
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Print runner specs
+        shell: pwsh
+        run: |
+          $computer = Get-CimInstance Win32_ComputerSystem
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          $ramGiB = [math]::Round($computer.TotalPhysicalMemory / 1GB, 1)
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "CPU: $($cpu.Name)"
+          Write-Host "Logical CPUs: $($computer.NumberOfLogicalProcessors)"
+          Write-Host "Physical CPUs: $($computer.NumberOfProcessors)"
+          Write-Host "Total RAM: $ramGiB GiB"
+          Write-Host "Disk usage:"
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize Name, @{Name='Size(GB)';Expression={[math]::Round(($_.Used + $_.Free) / 1GB, 1)}}, @{Name='Free(GB)';Expression={[math]::Round($_.Free / 1GB, 1)}}
+      - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install compression tools
+        shell: pwsh
+        run: |
+          if (-not (Get-Command zstd -ErrorAction SilentlyContinue)) {
+            choco install zstandard -y
+          }
+      - name: Cargo build
+        shell: pwsh
+        run: |
+          $buildArgs = @()
+          foreach ($binary in $env:WINDOWS_BINARIES.Split(" ")) {
+            $buildArgs += @("--bin", $binary)
+          }
+          Write-Host "CARGO_PROFILE_RELEASE_LTO: $env:CARGO_PROFILE_RELEASE_LTO"
+          & cargo build --target "${{ matrix.target }}" --release --timings @buildArgs
+      - name: Upload Cargo timings
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: cargo-timings-rust-release-${{ matrix.target }}
+          path: codex-rs/target/**/cargo-timings/cargo-timing.html
+          if-no-files-found: warn
+      - name: Stage artifacts
+        shell: pwsh
+        run: |
+          $target = "${{ matrix.target }}"
+          $dest = "dist/$target"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+
+          foreach ($binary in $env:WINDOWS_BINARIES.Split(" ")) {
+            Copy-Item "target/$target/release/$binary.exe" "$dest/$binary-$target.exe"
+          }
+
+          Get-ChildItem $dest -Filter "*.exe" | ForEach-Object {
+            7z a "$($_.FullName).zip" "$($_.FullName)"
+            zstd -T0 -19 --rm "$($_.FullName)"
+          }
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            codex-rs/dist/${{ matrix.target }}/*
 
   release:
     needs:
       - build
       - build-windows
-      - argument-comment-lint-release-assets
-      - zsh-release-assets
     name: release
     runs-on: ubuntu-latest
     permissions:
@@ -595,27 +530,6 @@ jobs:
           # Mark as prerelease only when the version has a suffix after x.y.z
           # (e.g. -alpha, -beta). Otherwise publish a normal release.
           prerelease: ${{ contains(steps.release_name.outputs.name, '-') }}
-
-      - uses: facebook/dotslash-publish-release@9c9ec027515c34db9282a09a25a9cab5880b2c52 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag: ${{ github.ref_name }}
-          config: .github/dotslash-config.json
-
-      - uses: facebook/dotslash-publish-release@9c9ec027515c34db9282a09a25a9cab5880b2c52 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag: ${{ github.ref_name }}
-          config: .github/dotslash-zsh-config.json
-
-      - uses: facebook/dotslash-publish-release@9c9ec027515c34db9282a09a25a9cab5880b2c52 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag: ${{ github.ref_name }}
-          config: .github/dotslash-argument-comment-lint-config.json
 
       - name: Trigger developers.openai.com deploy
         # Only trigger the deploy if the release is not a pre-release.
