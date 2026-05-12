@@ -620,7 +620,7 @@ jobs:
       - name: Trigger developers.openai.com deploy
         # Only trigger the deploy if the release is not a pre-release.
         # The deploy is used to update the developers.openai.com website with the new config schema json file.
-        if: ${{ !contains(steps.release_name.outputs.name, '-') }}
+        if: ${{ github.repository == 'openai/codex' && !contains(steps.release_name.outputs.name, '-') }}
         continue-on-error: true
         env:
           DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL: ${{ secrets.DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL }}
@@ -650,7 +650,7 @@ jobs:
           # Node 24 bundles npm >= 11.5.1, which trusted publishing requires.
           node-version: 24
           registry-url: "https://registry.npmjs.org"
-          scope: "@openai"
+          scope: "@peezy-tech"
 
       - name: Download npm tarballs from release
         env:
@@ -677,23 +677,33 @@ jobs:
               --dir dist/npm
           done
 
-      # No NODE_AUTH_TOKEN needed because we use OIDC.
+      # OIDC is the steady-state path. NODE_AUTH_TOKEN is only a first-publish
+      # fallback while the @peezy-tech Codex package family does not exist yet.
       - name: Publish to npm
         env:
           VERSION: ${{ needs.release.outputs.version }}
           NPM_TAG: ${{ needs.release.outputs.npm_tag }}
+          # Bootstrap fallback for the first @peezy-tech Codex package publish.
+          # npm trusted publishing can only be configured after each package exists,
+          # so this should be removed from repo secrets after OIDC is configured.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          if [[ -n "${NPM_TOKEN:-}" ]]; then
+            export NODE_AUTH_TOKEN="${NPM_TOKEN}"
+          fi
+
           prefix=""
           if [[ -n "${NPM_TAG}" ]]; then
             prefix="${NPM_TAG}-"
           fi
 
           root_tarball="dist/npm/codex-npm-${VERSION}.tgz"
+          responses_api_proxy_tarball="dist/npm/codex-responses-api-proxy-npm-${VERSION}.tgz"
           sdk_tarball="dist/npm/codex-sdk-npm-${VERSION}.tgz"
           # Keep this list in sync with CODEX_PLATFORM_PACKAGES in
           # codex-cli/scripts/build_npm_package.py. The root wrapper advances
-          # @openai/codex@latest as soon as it publishes, so every platform
+          # @peezy-tech/codex@latest as soon as it publishes, so every platform
           # package it aliases must already exist in the registry first.
           platform_tarballs=(
             "dist/npm/codex-npm-linux-x64-${VERSION}.tgz"
@@ -704,7 +714,7 @@ jobs:
             "dist/npm/codex-npm-win32-arm64-${VERSION}.tgz"
           )
 
-          for required_tarball in "${platform_tarballs[@]}" "${root_tarball}"; do
+          for required_tarball in "${platform_tarballs[@]}" "${responses_api_proxy_tarball}" "${root_tarball}" "${sdk_tarball}"; do
             if [[ ! -f "${required_tarball}" ]]; then
               echo "Missing npm tarball: ${required_tarball}"
               exit 1
@@ -714,7 +724,7 @@ jobs:
           shopt -s nullglob
           other_tarballs=()
           for tarball in dist/npm/*-"${VERSION}".tgz; do
-            if [[ "${tarball}" == "${root_tarball}" || "${tarball}" == "${sdk_tarball}" ]]; then
+            if [[ "${tarball}" == "${root_tarball}" || "${tarball}" == "${responses_api_proxy_tarball}" || "${tarball}" == "${sdk_tarball}" ]]; then
               continue
             fi
 
@@ -733,16 +743,16 @@ jobs:
           done
 
           # Publish the platform packages before the root CLI wrapper. The root
-          # wrapper advances @openai/codex@latest, so it should only publish
+          # wrapper advances @peezy-tech/codex@latest, so it should only publish
           # after the optional dependency versions it references exist.
+          # Publish the SDK last because it depends on the root CLI wrapper.
           tarballs=(
             "${platform_tarballs[@]}"
+            "${responses_api_proxy_tarball}"
             "${other_tarballs[@]}"
             "${root_tarball}"
+            "${sdk_tarball}"
           )
-          if [[ -f "${sdk_tarball}" ]]; then
-            tarballs+=("${sdk_tarball}")
-          fi
 
           for tarball in "${tarballs[@]}"; do
             filename="$(basename "${tarball}")"
@@ -763,7 +773,7 @@ jobs:
                 ;;
             esac
 
-            publish_cmd=(npm publish "${GITHUB_WORKSPACE}/${tarball}")
+            publish_cmd=(npm publish "${GITHUB_WORKSPACE}/${tarball}" --access public)
             if [[ -n "${tag}" ]]; then
               publish_cmd+=(--tag "${tag}")
             fi
@@ -792,7 +802,7 @@ jobs:
     needs: release
     # Only publish stable/mainline releases to WinGet; pre-releases include a
     # '-' in the semver string (e.g., 1.2.3-alpha.1).
-    if: ${{ !contains(needs.release.outputs.version, '-') }}
+    if: ${{ github.repository == 'openai/codex' && !contains(needs.release.outputs.version, '-') }}
     # This job only invokes a GitHub Action to open/update the winget-pkgs PR;
     # it does not execute Windows-only tooling, so Linux is sufficient.
     runs-on: ubuntu-latest
@@ -815,6 +825,7 @@ jobs:
     permissions:
       contents: write
     needs: release
+    if: ${{ github.repository == 'openai/codex' }}
     runs-on: ubuntu-latest
 
     steps:
