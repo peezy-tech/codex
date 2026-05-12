@@ -1,5 +1,5 @@
 {
-  "name": "@peezy-tech/codex-sdk",
+  "name": "@peezy.tech/codex-sdk",
   "version": "0.0.0-dev",
   "description": "TypeScript SDK for Codex APIs.",
   "repository": {

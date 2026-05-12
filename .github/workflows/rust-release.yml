@@ -564,7 +564,7 @@ jobs:
           # Node 24 bundles npm >= 11.5.1, which trusted publishing requires.
           node-version: 24
           registry-url: "https://registry.npmjs.org"
-          scope: "@peezy-tech"
+          scope: "@peezy.tech"
 
       - name: Download npm tarballs from release
         env:
@@ -592,12 +592,12 @@ jobs:
           done
 
       # OIDC is the steady-state path. NODE_AUTH_TOKEN is only a first-publish
-      # fallback while the @peezy-tech Codex package family does not exist yet.
+      # fallback while the @peezy.tech Codex package family does not exist yet.
       - name: Publish to npm
         env:
           VERSION: ${{ needs.release.outputs.version }}
           NPM_TAG: ${{ needs.release.outputs.npm_tag }}
-          # Bootstrap fallback for the first @peezy-tech Codex package publish.
+          # Bootstrap fallback for the first @peezy.tech Codex package publish.
           # npm trusted publishing can only be configured after each package exists,
           # so this should be removed from repo secrets after OIDC is configured.
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -617,7 +617,7 @@ jobs:
           sdk_tarball="dist/npm/codex-sdk-npm-${VERSION}.tgz"
           # Keep this list in sync with CODEX_PLATFORM_PACKAGES in
           # codex-cli/scripts/build_npm_package.py. The root wrapper advances
-          # @peezy-tech/codex@latest as soon as it publishes, so every platform
+          # @peezy.tech/codex@latest as soon as it publishes, so every platform
           # package it aliases must already exist in the registry first.
           platform_tarballs=(
             "dist/npm/codex-npm-linux-x64-${VERSION}.tgz"
@@ -657,7 +657,7 @@ jobs:
           done
 
           # Publish the platform packages before the root CLI wrapper. The root
-          # wrapper advances @peezy-tech/codex@latest, so it should only publish
+          # wrapper advances @peezy.tech/codex@latest, so it should only publish
           # after the optional dependency versions it references exist.
           # Publish the SDK last because it depends on the root CLI wrapper.
           tarballs=(

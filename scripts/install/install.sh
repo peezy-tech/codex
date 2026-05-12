@@ -567,10 +567,10 @@ handle_conflicting_install() {
       uninstall_cmd="brew uninstall --cask codex"
       ;;
     bun)
-      uninstall_cmd="bun remove -g @peezy-tech/codex"
+      uninstall_cmd="bun remove -g @peezy.tech/codex"
       ;;
     *)
-      uninstall_cmd="npm uninstall -g @peezy-tech/codex"
+      uninstall_cmd="npm uninstall -g @peezy.tech/codex"
       ;;
   esac
 
