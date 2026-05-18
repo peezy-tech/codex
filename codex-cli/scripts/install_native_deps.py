@@ -178,12 +178,13 @@ def main() -> int:
         workflow_url = DEFAULT_WORKFLOW_URL
 
     workflow_id = workflow_url.rstrip("/").split("/")[-1]
-    print(f"Downloading native artifacts from workflow {workflow_id}...")
+    workflow_repo = workflow_repo_from_url(workflow_url) or "openai/codex"
+    print(f"Downloading native artifacts from {workflow_repo} workflow {workflow_id}...")
 
-    with _gha_group(f"Download native artifacts from workflow {workflow_id}"):
+    with _gha_group(f"Download native artifacts from {workflow_repo} workflow {workflow_id}"):
         with tempfile.TemporaryDirectory(prefix="codex-native-artifacts-") as artifacts_dir_str:
             artifacts_dir = Path(artifacts_dir_str)
-            _download_artifacts(workflow_id, artifacts_dir)
+            _download_artifacts(workflow_repo, workflow_id, artifacts_dir)
             install_binary_components(
                 artifacts_dir,
                 vendor_dir,
@@ -197,6 +198,17 @@ def main() -> int:
 
     print(f"Installed native dependencies into {vendor_dir}")
     return 0
+
+
+def workflow_repo_from_url(workflow_url: str) -> str | None:
+    parsed = urlparse(workflow_url)
+    if parsed.netloc not in {"github.com", "www.github.com"}:
+        return None
+
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 4 and parts[2] == "actions" and parts[3] == "runs":
+        return f"{parts[0]}/{parts[1]}"
+    return None
 
 
 def fetch_rg(
@@ -267,7 +279,7 @@ def fetch_rg(
     return [results[target] for target in targets]
 
 
-def _download_artifacts(workflow_id: str, dest_dir: Path) -> None:
+def _download_artifacts(workflow_repo: str, workflow_id: str, dest_dir: Path) -> None:
     cmd = [
         "gh",
         "run",
@@ -275,7 +287,7 @@ def _download_artifacts(workflow_id: str, dest_dir: Path) -> None:
         "--dir",
         str(dest_dir),
         "--repo",
-        "openai/codex",
+        workflow_repo,
         workflow_id,
     ]
     subprocess.check_call(cmd)
