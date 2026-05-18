@@ -1,12 +1,18 @@
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
+use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
+use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::CoreToolRuntime;
+use crate::tools::registry::PostToolUsePayload;
+use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
+use codex_protocol::models::ResponseInputItem;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
+use serde_json::json;
 
 use super::ExecContext;
 use super::PUBLIC_TOOL_NAME;
@@ -126,5 +132,45 @@ impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
 impl CoreToolRuntime for CodeModeExecuteHandler {
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Custom { .. })
+    }
+
+    fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        let ToolPayload::Custom { input } = &invocation.payload else {
+            return None;
+        };
+
+        Some(PreToolUsePayload {
+            tool_name: HookToolName::new(PUBLIC_TOOL_NAME),
+            tool_input: json!({ "source": input }),
+        })
+    }
+
+    fn post_tool_use_payload(
+        &self,
+        invocation: &ToolInvocation,
+        result: &dyn ToolOutput,
+    ) -> Option<PostToolUsePayload> {
+        let ToolPayload::Custom { input } = &invocation.payload else {
+            return None;
+        };
+
+        let (success, output) =
+            match result.to_response_item(&invocation.call_id, &invocation.payload) {
+                ResponseInputItem::FunctionCallOutput { output, .. }
+                | ResponseInputItem::CustomToolCallOutput { output, .. } => {
+                    (output.success, output.body.to_text().unwrap_or_default())
+                }
+                _ => (Some(result.success_for_logging()), result.log_preview()),
+            };
+
+        Some(PostToolUsePayload {
+            tool_name: HookToolName::new(PUBLIC_TOOL_NAME),
+            tool_use_id: invocation.call_id.clone(),
+            tool_input: json!({ "source": input }),
+            tool_response: json!({
+                "success": success,
+                "output": output,
+            }),
+        })
     }
 }

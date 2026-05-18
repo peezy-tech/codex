@@ -544,6 +544,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadShellCommandResponse,
     },
+    #[experimental("thread/codeMode/execute")]
+    ThreadCodeModeExecute => "thread/codeMode/execute" {
+        params: v2::ThreadCodeModeExecuteParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadCodeModeExecuteResponse,
+    },
     ThreadApproveGuardianDeniedAction => "thread/approveGuardianDeniedAction" {
         params: v2::ThreadApproveGuardianDeniedActionParams,
         serialization: thread_id(params.thread_id),

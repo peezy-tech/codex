@@ -154,6 +154,7 @@ Example with notification opt-out:
 - `thread/unarchive` — move an archived rollout file back into the sessions directory; returns the restored `thread` on success and emits `thread/unarchived`.
 - `thread/compact/start` — trigger conversation history compaction for a thread; returns `{}` immediately while progress streams through standard turn/item notifications.
 - `thread/shellCommand` — run a user-initiated `!` shell command against a thread; this runs unsandboxed with full access rather than inheriting the thread sandbox policy. Returns `{}` immediately while progress streams through standard turn/item notifications and any active turn receives the formatted output in its message stream.
+- `thread/codeMode/execute` — experimental; execute raw Code Mode JavaScript source in the native runtime for a loaded thread without starting a model turn. Returns `{}` immediately while the replay runs as a standalone turn and emits standard turn notifications.
 - `thread/backgroundTerminals/clean` — terminate all running background terminals for a thread (experimental; requires `capabilities.experimentalApi`); returns `{}` when the cleanup request is accepted.
 - `thread/rollback` — drop the last N turns from the agent’s in-memory context and persist a rollback marker in the rollout so future resumes see the pruned history; returns the updated `thread` (with `turns` populated) on success.
 - `turn/start` — add user input to a thread and begin Codex generation; responds with the initial `turn` object and streams `turn/started`, `item/*`, and `turn/completed` notifications. Experimental `runtimeWorkspaceRoots` replaces the thread-scoped runtime workspace roots used to materialize `:workspace_roots`; relative paths resolve against the effective turn cwd. Prefer experimental `permissions` profile selection by id for permission overrides; the legacy `sandboxPolicy` field is still accepted but cannot be combined with `permissions`. For `collaborationMode`, `settings.developer_instructions: null` means "use built-in instructions for the selected mode".
@@ -619,6 +620,17 @@ If the thread does not already have an active turn, the server starts a standalo
 ```json
 { "method": "thread/shellCommand", "id": 26, "params": { "threadId": "thr_b", "command": "git status --short" } }
 { "id": 26, "result": {} }
+```
+
+### Example: Replay Code Mode source
+
+Use `thread/codeMode/execute` to evaluate previously saved Code Mode JavaScript inside the native Code Mode runtime without asking the model for a turn. The request returns immediately with `{}`; the app-server opens a standalone turn, exposes the same Code Mode globals and nested-tool registry that model-authored Code Mode uses, then emits the runtime output as a final assistant message.
+
+The app-server must have the `code_mode` feature enabled through config or `--enable code_mode`. If you need custom MCP servers for the replay, start app-server with a prepared `CODEX_HOME` whose `config.toml` contains the desired `[mcp_servers.*]` entries.
+
+```json
+{ "method": "thread/codeMode/execute", "id": 27, "params": { "threadId": "thr_b", "source": "const out = await tools.exec_command({ cmd: 'pwd' });\ntext(out.output);" } }
+{ "id": 27, "result": {} }
 ```
 
 ### Example: Start a turn (send user input)

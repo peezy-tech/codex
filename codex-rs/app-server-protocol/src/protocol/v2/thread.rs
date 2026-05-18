@@ -783,6 +783,20 @@ pub struct ThreadShellCommandParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadShellCommandResponse {}
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCodeModeExecuteParams {
+    pub thread_id: String,
+    /// Raw Code Mode JavaScript source, optionally including a `// @exec:` pragma line.
+    pub source: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCodeModeExecuteResponse {}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

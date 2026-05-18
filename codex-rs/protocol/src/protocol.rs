@@ -774,6 +774,16 @@ pub enum Op {
         /// The raw command string after '!'
         command: String,
     },
+
+    /// Execute saved Code Mode source directly in the native runtime.
+    ///
+    /// This is intended for replaying a previously persisted Code Mode script
+    /// without starting a model turn. The source is evaluated by the same V8
+    /// runtime and nested-tool bridge used by model-authored Code Mode calls.
+    RunCodeModeSource {
+        /// Raw Code Mode JavaScript source, optionally including a pragma line.
+        source: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
@@ -875,6 +885,7 @@ impl Op {
             Self::ApproveGuardianDeniedAction { .. } => "approve_guardian_denied_action",
             Self::Shutdown => "shutdown",
             Self::RunUserShellCommand { .. } => "run_user_shell_command",
+            Self::RunCodeModeSource { .. } => "run_code_mode_source",
         }
     }
 }

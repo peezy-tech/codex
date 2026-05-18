@@ -635,6 +635,16 @@ impl ThreadRequestProcessor {
             .map(|response| Some(response.into()))
     }
 
+    pub(crate) async fn thread_code_mode_execute(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadCodeModeExecuteParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        self.thread_code_mode_execute_inner(request_id, params)
+            .await
+            .map(|response| Some(response.into()))
+    }
+
     pub(crate) async fn thread_approve_guardian_denied_action(
         &self,
         request_id: &ConnectionRequestId,
@@ -1749,6 +1759,27 @@ impl ThreadRequestProcessor {
         .await
         .map_err(|err| internal_error(format!("failed to start shell command: {err}")))?;
         Ok(ThreadShellCommandResponse {})
+    }
+
+    async fn thread_code_mode_execute_inner(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadCodeModeExecuteParams,
+    ) -> Result<ThreadCodeModeExecuteResponse, JSONRPCErrorError> {
+        let ThreadCodeModeExecuteParams { thread_id, source } = params;
+        if source.trim().is_empty() {
+            return Err(invalid_request("source must not be empty"));
+        }
+
+        let (_, thread) = self.load_thread(&thread_id).await?;
+        self.submit_core_op(
+            request_id,
+            thread.as_ref(),
+            Op::RunCodeModeSource { source },
+        )
+        .await
+        .map_err(|err| internal_error(format!("failed to start Code Mode replay: {err}")))?;
+        Ok(ThreadCodeModeExecuteResponse {})
     }
 
     async fn thread_approve_guardian_denied_action_inner(

@@ -20,6 +20,7 @@ use crate::realtime_conversation::REALTIME_USER_TEXT_PREFIX;
 use crate::realtime_conversation::prefix_realtime_v2_text;
 use crate::review_prompts::resolve_review_request;
 use crate::session::spawn_review_thread;
+use crate::tasks::CodeModeReplayTask;
 use crate::tasks::CompactTask;
 use crate::tasks::UserShellCommandMode;
 use crate::tasks::UserShellCommandTask;
@@ -349,6 +350,16 @@ pub async fn run_user_shell_command(sess: &Arc<Session>, sub_id: String, command
         Arc::clone(&turn_context),
         Vec::new(),
         UserShellCommandTask::new(command),
+    )
+    .await;
+}
+
+pub async fn run_code_mode_source(sess: &Arc<Session>, sub_id: String, source: String) {
+    let turn_context = sess.new_default_turn_with_sub_id(sub_id).await;
+    sess.spawn_task(
+        Arc::clone(&turn_context),
+        Vec::new(),
+        CodeModeReplayTask::new(source),
     )
     .await;
 }
@@ -883,6 +894,10 @@ pub(super) async fn submission_loop(
                 }
                 Op::RunUserShellCommand { command } => {
                     run_user_shell_command(&sess, sub.id.clone(), command).await;
+                    false
+                }
+                Op::RunCodeModeSource { source } => {
+                    run_code_mode_source(&sess, sub.id.clone(), source).await;
                     false
                 }
                 Op::ResolveElicitation {
