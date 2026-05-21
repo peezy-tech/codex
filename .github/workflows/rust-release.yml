@@ -83,6 +83,7 @@ jobs:
             target: x86_64-unknown-linux-musl
             artifact_name: x86_64-unknown-linux-musl
             binaries: "codex codex-responses-api-proxy bwrap"
+            cargo_build_jobs: "1"
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             artifact_name: aarch64-unknown-linux-musl
