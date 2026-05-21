@@ -241,15 +241,15 @@ jobs:
       - name: Cargo build
         shell: bash
         env:
-          CARGO_BUILD_JOBS_OVERRIDE: ${{ matrix.cargo_build_jobs || '' }}
+          PATCH_RELEASE_CARGO_BUILD_JOBS: ${{ matrix.cargo_build_jobs || '' }}
         run: |
           build_args=()
           for binary in ${{ matrix.binaries }}; do
             build_args+=(--bin "$binary")
           done
-          if [[ -n "${CARGO_BUILD_JOBS_OVERRIDE}" ]]; then
-            build_args+=(-j "${CARGO_BUILD_JOBS_OVERRIDE}")
-            echo "CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS_OVERRIDE}"
+          if [[ -n "${PATCH_RELEASE_CARGO_BUILD_JOBS}" ]]; then
+            build_args+=(-j "${PATCH_RELEASE_CARGO_BUILD_JOBS}")
+            echo "CARGO_BUILD_JOBS: ${PATCH_RELEASE_CARGO_BUILD_JOBS}"
           fi
           echo "CARGO_PROFILE_RELEASE_LTO: ${CARGO_PROFILE_RELEASE_LTO}"
           cargo build --target ${{ matrix.target }} --release --timings "${build_args[@]}"
